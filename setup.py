@@ -25,7 +25,7 @@ extras_require = {
     "windows": ["pywin32", "psutil"],
     "linux": [],
     "python-doctr": [
-        "python-doctr @ git+https://github.com/koenvaneijk/doctr.git@af711bc04eb8876a7189923fb51ec44481ee18cd"
+        "python-doctr"
     ],
 }
 
@@ -44,7 +44,7 @@ else:
 if current_os and current_os in extras_require:
     install_requires.extend(extras_require[current_os])
 
-install_requires.extend(extras_require.get("python-doctr", []))
+# Keep python-doctr optional; install via extras or requirements as needed.
 
 setup(
     name="OpenRecall",
