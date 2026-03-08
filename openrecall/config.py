@@ -17,7 +17,8 @@ parser.add_argument(
     default=False,
 )
 
-args = parser.parse_args()
+# Avoid parsing CLI args at import time (breaks pytest collection).
+args, _unknown = parser.parse_known_args()
 
 
 def get_appdata_folder(app_name="openrecall"):
