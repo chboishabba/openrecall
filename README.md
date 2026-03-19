@@ -42,6 +42,28 @@ OpenRecall offers several key advantages over closed-source alternatives:
 - **Semantic Search**: Advanced local OCR interprets your history, providing robust semantic search capabilities.
 - **Full Control Over Storage**: Your data is stored locally, giving you complete control over its management and security.
 
+## Embedding Backend
+
+- OpenRecall can generate text embeddings for search using an optional
+  `sentence-transformers` backend.
+- By default, the app attempts a local `sentence-transformers` model and falls
+  back to a deterministic local vectorizer if that dependency is unavailable.
+- To force the local fallback path for lighter/isolated installs, set:
+
+```bash
+export OPENRECALL_EMBEDDING_BACKEND=local
+```
+
+- To avoid optional model downloads entirely, install OpenRecall without the
+  embedding extras (recommended for CPU-only or constrained environments).
+  If you want higher-quality semantic recall, install the optional
+  dependency set.
+
+```bash
+pip install .
+pip install .[embeddings]
+```
+
 <p align="center">
   <img src="images/lisa_rewind.webp" alt="Lisa Rewind" width="400">
 </p>
@@ -122,4 +144,3 @@ mail@datatalk.be
 ## License
 
 OpenRecall is released under the [AGPLv3](https://opensource.org/licenses/AGPL-3.0), ensuring that it remains open and accessible to everyone.
-

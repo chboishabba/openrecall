@@ -11,7 +11,6 @@ install_requires = [
     "Flask",
     "numpy",
     "mss",
-    "sentence-transformers",
     "torch",
     "torchvision",
     "shapely",
@@ -24,9 +23,8 @@ install_requires = [
 extras_require = {
     "windows": ["pywin32", "psutil"],
     "linux": [],
-    "python-doctr": [
-        "python-doctr"
-    ],
+    "python-doctr": ["python-doctr"],
+    "embeddings": ["sentence-transformers"],
 }
 
 # Determine the current OS
