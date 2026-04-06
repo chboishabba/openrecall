@@ -64,6 +64,22 @@ pip install .
 pip install .[embeddings]
 ```
 
+## Optional ITIR MCP bridge
+
+Within `ITIR-suite`, OpenRecall can also hand bounded capture observations to
+the suite-level `itir-mcp` contract for deterministic comparison/coherence
+analysis.
+
+- local OCR, screenshot capture, and image similarity remain OpenRecall-owned
+- comparison/coherence semantics can be delegated to `itir.compare_observations`
+  and `itir.score_coherence`
+- MCP is the canonical tool contract; the current local Python client uses the
+  `itir-mcp --bridge` JSON transport as its concrete invocation path
+- the public comparison helpers now consume the guarded `safe_call` path and
+  only accept verified ITIR results
+- this keeps one canonical comparison contract across OpenRecall and
+  WorldMonitor instead of copying scoring logic into each producer
+
 <p align="center">
   <img src="images/lisa_rewind.webp" alt="Lisa Rewind" width="400">
 </p>
