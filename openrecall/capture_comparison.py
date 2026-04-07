@@ -7,7 +7,7 @@ import numpy as np
 
 from openrecall.mcp_client import (
     build_envelope as itir_build_envelope,
-    compare_observations as itir_compare_observations,
+    compare_observations_with_policy_hint as itir_compare_observations,
     score_coherence as itir_score_coherence,
 )
 
@@ -85,12 +85,18 @@ def compare_capture_texts(
         right_text,
         timestamp=right_timestamp,
     )
-    bridge_comparison = itir_compare_observations(left_observation, right_observation)
-    bridge_signals = bridge_comparison.get("signals") if isinstance(bridge_comparison.get("signals"), Mapping) else {}
+    bridge_call = itir_compare_observations(left_observation, right_observation)
+    result_payload = bridge_call.get("result") if isinstance(bridge_call, Mapping) else {}
+    if not isinstance(result_payload, Mapping):
+        result_payload = {}
+    policy_hint = bridge_call.get("policy_hint") if isinstance(bridge_call.get("policy_hint"), Mapping) else {}
+    if not isinstance(policy_hint, dict):
+        policy_hint = {}
+    bridge_signals = result_payload.get("signals") if isinstance(result_payload.get("signals"), Mapping) else {}
     if "text_overlap" in bridge_signals:
         text_similarity = float(bridge_signals.get("text_overlap") or 0.0)
     else:
-        text_similarity = float(bridge_comparison.get("similarity") or 0.0)
+        text_similarity = float(result_payload.get("similarity") or 0.0)
 
     image_similarity = 0.0
     if left_image is not None and right_image is not None:
@@ -126,8 +132,11 @@ def compare_capture_texts(
         "change_confidence": result.change_confidence,
         "shared_terms": list(result.shared_terms),
         "new_terms": list(result.new_terms),
-        "itir_similarity": bridge_comparison.get("similarity"),
-        "itir_confidence": bridge_comparison.get("confidence"),
+        "itir_similarity": result_payload.get("similarity"),
+        "itir_confidence": result_payload.get("confidence"),
+        "itir_decision": str(policy_hint.get("decision") or "verified"),
+        "status_explanation": bridge_call.get("status_explanation") if isinstance(bridge_call.get("status_explanation"), Mapping) else {},
+        "policy_hint": dict(policy_hint),
     }
 
 

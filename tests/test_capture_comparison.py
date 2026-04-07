@@ -15,9 +15,28 @@ def test_compare_capture_texts_uses_existing_embedding_path(monkeypatch):
     def fake_itir_compare_observations(left, right):
         calls["bridge"].append((left, right))
         return {
-            "similarity": 0.6,
-            "confidence": "medium",
-            "signals": {"text_overlap": 0.0, "time_proximity": 0.5, "geo_proximity": None},
+            "decision": "verified",
+            "result": {
+                "similarity": 0.6,
+                "confidence": "medium",
+                "signals": {"text_overlap": 0.0, "time_proximity": 0.5, "geo_proximity": None},
+            },
+            "status_explanation": {
+                "status_scope": "security",
+                "status_value": "review",
+                "status_bucket": "allow",
+                "why": "policy pass",
+                "primary_reason_code": "allow",
+                "reason_codes": ["allow"],
+            },
+            "policy_hint": {
+                "decision": "verified",
+                "status_scope": "security",
+                "status_value": "review",
+                "status_bucket": "allow",
+                "primary_reason_code": "allow",
+                "reason_codes": ["allow"],
+            },
         }
 
     monkeypatch.setattr(
@@ -62,9 +81,28 @@ def test_compare_captures_uses_existing_ocr_and_ssim(monkeypatch):
     monkeypatch.setattr(
         "openrecall.capture_comparison.itir_compare_observations",
         lambda left, right: {
-            "similarity": 0.5,
-            "confidence": "medium",
-            "signals": {"text_overlap": 0.5, "time_proximity": 1.0, "geo_proximity": None},
+            "decision": "verified",
+            "result": {
+                "similarity": 0.5,
+                "confidence": "medium",
+                "signals": {"text_overlap": 0.5, "time_proximity": 1.0, "geo_proximity": None},
+            },
+            "status_explanation": {
+                "status_scope": "security",
+                "status_value": "review",
+                "status_bucket": "allow",
+                "why": "policy pass",
+                "primary_reason_code": "allow",
+                "reason_codes": ["allow"],
+            },
+            "policy_hint": {
+                "decision": "verified",
+                "status_scope": "security",
+                "status_value": "review",
+                "status_bucket": "allow",
+                "primary_reason_code": "allow",
+                "reason_codes": ["allow"],
+            },
         },
     )
     monkeypatch.setattr(
@@ -85,6 +123,44 @@ def test_compare_captures_uses_existing_ocr_and_ssim(monkeypatch):
     assert result["image_similarity"] == 0.8
     assert result["shared_terms"] == ["note", "shared"]
     assert result["new_terms"] == ["updated"]
+
+
+def test_compare_capture_texts_returns_policy_hint_when_not_verified(monkeypatch):
+    def fake_itir_compare_observations(left, right):
+        return {
+            "decision": "rejected",
+            "result": None,
+            "status_explanation": {
+                "status_scope": "security",
+                "status_value": "rejected",
+                "status_bucket": "review",
+                "primary_reason_code": "sensitive_data_request",
+                "reason_codes": ["sensitive_data_request"],
+                "why": "policy risk",
+            },
+            "policy_hint": {
+                "decision": "rejected",
+                "status_scope": "security",
+                "status_value": "rejected",
+                "status_bucket": "review",
+                "primary_reason_code": "sensitive_data_request",
+                "reason_codes": ["sensitive_data_request"],
+                "next_action": "review",
+            },
+        }
+
+    monkeypatch.setattr(
+        "openrecall.capture_comparison.itir_compare_observations",
+        fake_itir_compare_observations,
+    )
+
+    result = compare_capture_texts("left", "right", left_timestamp=100, right_timestamp=160)
+
+    assert result["itir_similarity"] is None
+    assert result["itir_confidence"] is None
+    assert result["itir_decision"] == "rejected"
+    assert result["status_explanation"]["primary_reason_code"] == "sensitive_data_request"
+    assert result["policy_hint"]["decision"] == "rejected"
 
 
 def test_score_timeline_change_window_tracks_largest_change(monkeypatch):

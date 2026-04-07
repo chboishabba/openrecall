@@ -77,6 +77,53 @@ def _verified_tool_result(name: str, payload: Mapping[str, Any]) -> dict[str, An
     return result
 
 
+def _normalize_policy_hint(name: str, guarded: Mapping[str, Any]) -> dict[str, Any]:
+    decision = str(guarded.get("decision") or "abstained")
+    explanation = guarded.get("status_explanation") if isinstance(guarded.get("status_explanation"), dict) else {}
+    if not isinstance(explanation, dict):
+        explanation = {}
+
+    status_scope = str(explanation.get("status_scope") or "security")
+    status_value = str(explanation.get("status_value") or ("allowed" if decision == "verified" else "reviewed"))
+    status_bucket = str(explanation.get("status_bucket") or ("allow" if decision == "verified" else "review"))
+    primary_reason_code = explanation.get("primary_reason_code")
+    if not primary_reason_code:
+        reason_codes = explanation.get("reason_codes") if isinstance(explanation.get("reason_codes"), list) else []
+        primary_reason_code = str(reason_codes[0]) if reason_codes else ("verified" if decision == "verified" else "policy_gate_not_passed")
+
+    reason_codes = explanation.get("reason_codes") if isinstance(explanation.get("reason_codes"), list) else []
+
+    return {
+        "tool": name,
+        "decision": decision,
+        "status_scope": status_scope,
+        "status_value": status_value,
+        "status_bucket": status_bucket,
+        "primary_reason_code": str(primary_reason_code),
+        "reason_codes": [str(code) for code in reason_codes],
+        "why": str(explanation.get("why") or "") if explanation.get("why") is not None else "",
+        "next_action": str(explanation.get("next_action") or ""),
+        "policy_outcomes": list(guarded.get("policy_outcomes") or []),
+    }
+
+
+def compare_observations_with_policy_hint(
+    left: Mapping[str, Any],
+    right: Mapping[str, Any],
+) -> dict[str, Any]:
+    guarded = safe_call_tool("itir.compare_observations", {"left": dict(left), "right": dict(right)})
+    policy_hint = _normalize_policy_hint("itir.compare_observations", guarded)
+    result = guarded.get("result")
+    if not isinstance(result, dict):
+        result = None
+    return {
+        "result": result,
+        "decision": policy_hint["decision"],
+        "status_explanation": guarded.get("status_explanation") if isinstance(guarded.get("status_explanation"), dict) else {},
+        "policy_hint": policy_hint,
+    }
+
+
 def compare_observations(left: Mapping[str, Any], right: Mapping[str, Any]) -> dict[str, Any]:
     return _verified_tool_result("itir.compare_observations", {"left": dict(left), "right": dict(right)})
 
