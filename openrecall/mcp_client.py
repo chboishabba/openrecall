@@ -11,6 +11,7 @@ from .itir_client import (
     build_envelope,
     call_tool,
     compare_observations,
+    compare_observations_with_policy_hint,
     safe_call_tool,
     score_coherence,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "build_envelope",
     "call_tool",
     "compare_observations",
+    "compare_observations_with_policy_hint",
     "safe_call_tool",
     "score_coherence",
 ]

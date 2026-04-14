@@ -75,10 +75,15 @@ analysis.
   and `itir.score_coherence`
 - MCP is the canonical tool contract; the current local Python client uses the
   `itir-mcp --bridge` JSON transport as its concrete invocation path
-- the public comparison helpers now consume the guarded `safe_call` path and
-  only accept verified ITIR results
+- the public comparison helpers consume the guarded `safe_call` path and return a
+  bounded policy hint (`status_explanation` + `policy_hint`) with any
+  verification outcome
+- verified outcomes keep the previous `itir.compare_observations` behavior
+  (result payload present and used as before)
+- rejected/abstained outcomes now return an explicit non-judgmental signal instead
+  of raising through OpenRecall APIs
 - this keeps one canonical comparison contract across OpenRecall and
-  WorldMonitor instead of copying scoring logic into each producer
+  WorldMonitor instead of duplicating comparison logic in each producer
 
 <p align="center">
   <img src="images/lisa_rewind.webp" alt="Lisa Rewind" width="400">
