@@ -230,6 +230,13 @@ So the default operating model is:
 - OCR write-back goes back into a chosen local `recall.db`, not one global
   merged history
 
+For easier merge and split semantics, both the local `entries` table and the
+central timeline now keep:
+
+- `captured_date` for day-bucket grouping, export windows, retention, and
+  coarse merge/sync boundaries
+- `timestamp` / `captured_at` for precise ordering and replay inside that day
+
 ### Unified timeline query
 
 To inspect the shared central timeline for one user across multiple devices:
@@ -249,6 +256,16 @@ python -m openrecall.bundle_jobs query-timeline \
   --org-id personal \
   --user-id alice \
   --device-id workstation-a
+```
+
+To query one day bucket directly:
+
+```bash
+python -m openrecall.bundle_jobs query-timeline \
+  --registry-root /srv/openrecall-processing \
+  --org-id personal \
+  --user-id alice \
+  --captured-date 2026-05-01
 ```
 
 The default timeline semantics are:

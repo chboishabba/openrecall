@@ -79,20 +79,40 @@ def build_day_window(date_str: str) -> BundleWindow:
 def query_entries_for_window(
     db_path: str,
     *,
+    captured_date: str,
     start_timestamp: int,
     end_timestamp: int,
 ) -> list[dict[str, Any]]:
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
+        columns = {
+            row[1] for row in cursor.execute("PRAGMA table_info(entries)").fetchall()
+        }
+        if "captured_date" not in columns:
+            cursor.execute("ALTER TABLE entries ADD COLUMN captured_date TEXT")
+            cursor.execute(
+                """
+                UPDATE entries
+                SET captured_date = date(timestamp, 'unixepoch')
+                WHERE captured_date IS NULL AND timestamp IS NOT NULL
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_captured_date_timestamp
+                ON entries (captured_date, timestamp)
+                """
+            )
+            conn.commit()
         cursor.execute(
             """
-            SELECT id, app, title, text, timestamp
+            SELECT id, app, title, text, captured_date, timestamp
             FROM entries
-            WHERE timestamp >= ? AND timestamp <= ?
+            WHERE captured_date = ? AND timestamp >= ? AND timestamp <= ?
             ORDER BY timestamp ASC
             """,
-            (start_timestamp, end_timestamp),
+            (captured_date, start_timestamp, end_timestamp),
         )
         return [dict(row) for row in cursor.fetchall()]
 
@@ -119,6 +139,7 @@ def _manifest_entries(
         manifest_entries.append(
             {
                 "entry_id": int(entry["id"]),
+                "captured_date": str(entry.get("captured_date") or ""),
                 "timestamp": timestamp,
                 "captured_at": float(timestamp),
                 "app": str(entry.get("app") or ""),
@@ -163,6 +184,7 @@ def build_session_bundle_manifest(
     screenshots_dir = Path(screenshots_path)
     entries = query_entries_for_window(
         db_path,
+        captured_date=window.captured_date,
         start_timestamp=window.start_timestamp,
         end_timestamp=window.end_timestamp,
     )
@@ -287,6 +309,7 @@ def _ensure_registry_schema(registry_db_path: Path) -> None:
                 user_id TEXT NOT NULL,
                 device_id TEXT NOT NULL,
                 session_id TEXT NOT NULL,
+                captured_date TEXT NOT NULL,
                 entry_id INTEGER NOT NULL,
                 timestamp INTEGER NOT NULL,
                 captured_at REAL NOT NULL,
@@ -309,6 +332,7 @@ def _ensure_registry_schema(registry_db_path: Path) -> None:
                 user_id TEXT NOT NULL,
                 device_id TEXT NOT NULL,
                 session_id TEXT NOT NULL,
+                captured_date TEXT NOT NULL,
                 entry_id INTEGER NOT NULL,
                 timestamp INTEGER NOT NULL,
                 captured_at REAL NOT NULL,
@@ -329,6 +353,32 @@ def _ensure_registry_schema(registry_db_path: Path) -> None:
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_history_device_time ON history_events (org_id, user_id, device_id, captured_at)"
+        )
+        bundle_entry_columns = {
+            row[1] for row in cursor.execute("PRAGMA table_info(bundle_entries)").fetchall()
+        }
+        if "captured_date" not in bundle_entry_columns:
+            cursor.execute(
+                "ALTER TABLE bundle_entries ADD COLUMN captured_date TEXT NOT NULL DEFAULT ''"
+            )
+        history_columns = {
+            row[1] for row in cursor.execute("PRAGMA table_info(history_events)").fetchall()
+        }
+        if "captured_date" not in history_columns:
+            cursor.execute(
+                "ALTER TABLE history_events ADD COLUMN captured_date TEXT NOT NULL DEFAULT ''"
+            )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_history_scope_day_time
+            ON history_events (org_id, user_id, captured_date, timestamp)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_history_device_day_time
+            ON history_events (org_id, user_id, device_id, captured_date, timestamp)
+            """
         )
         conn.commit()
 
@@ -412,12 +462,16 @@ def ingest_session_bundle(
                 vision_payload_path.read_text() if vision_payload_path.exists() else None
             )
             captured_at = float(entry.get("captured_at") or entry["timestamp"])
+            captured_date = str(
+                entry.get("captured_date") or manifest.get("captured_date") or ""
+            )
             row = (
                 manifest["bundle_id"],
                 manifest["org_id"],
                 manifest["user_id"],
                 manifest["device_id"],
                 manifest["session_id"],
+                captured_date,
                 int(entry["entry_id"]),
                 int(entry["timestamp"]),
                 captured_at,
@@ -430,20 +484,20 @@ def ingest_session_bundle(
             cursor.execute(
                 """
                 INSERT INTO bundle_entries (
-                    bundle_id, org_id, user_id, device_id, session_id, entry_id,
+                    bundle_id, org_id, user_id, device_id, session_id, captured_date, entry_id,
                     timestamp, captured_at, app, title, text, capture_files_json,
                     vision_payload_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 row,
             )
             cursor.execute(
                 """
                 INSERT INTO history_events (
-                    bundle_id, org_id, user_id, device_id, session_id, entry_id,
+                    bundle_id, org_id, user_id, device_id, session_id, captured_date, entry_id,
                     timestamp, captured_at, app, title, text, capture_files_json,
                     vision_payload_json, imported_at, source_mode
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 row + (imported_at, source_mode),
             )
@@ -546,6 +600,9 @@ def writeback_ocr_results(
             embedding,
             str(entry.get("app") or ""),
             str(entry.get("title") or ""),
+            captured_date=str(
+                entry.get("captured_date") or manifest.get("captured_date") or ""
+            ),
         )
 
         if collected_segments or collected_metadata:
@@ -584,6 +641,7 @@ def query_history_timeline(
     org_id: str,
     user_id: str,
     device_ids: list[str] | None = None,
+    captured_date: str | None = None,
     captured_after: float | None = None,
     captured_before: float | None = None,
     limit: int | None = None,
@@ -597,6 +655,9 @@ def query_history_timeline(
         placeholders = ",".join("?" for _ in device_ids)
         clauses.append(f"device_id IN ({placeholders})")
         params.extend(device_ids)
+    if captured_date is not None:
+        clauses.append("captured_date = ?")
+        params.append(str(captured_date))
     if captured_after is not None:
         clauses.append("captured_at >= ?")
         params.append(float(captured_after))
@@ -605,7 +666,7 @@ def query_history_timeline(
         params.append(float(captured_before))
 
     sql = """
-        SELECT bundle_id, org_id, user_id, device_id, session_id, entry_id,
+        SELECT bundle_id, org_id, user_id, device_id, session_id, captured_date, entry_id,
                timestamp, captured_at, app, title, text, capture_files_json,
                vision_payload_json, imported_at, source_mode
         FROM history_events
@@ -677,6 +738,7 @@ def _build_parser() -> argparse.ArgumentParser:
     timeline_parser.add_argument("--org-id", required=True)
     timeline_parser.add_argument("--user-id", required=True)
     timeline_parser.add_argument("--device-id", action="append", dest="device_ids")
+    timeline_parser.add_argument("--captured-date", default=None)
     timeline_parser.add_argument("--captured-after", type=float, default=None)
     timeline_parser.add_argument("--captured-before", type=float, default=None)
     timeline_parser.add_argument("--limit", type=int, default=None)
@@ -729,6 +791,7 @@ def main(argv: list[str] | None = None) -> int:
             org_id=args.org_id,
             user_id=args.user_id,
             device_ids=args.device_ids,
+            captured_date=args.captured_date,
             captured_after=args.captured_after,
             captured_before=args.captured_before,
             limit=args.limit,

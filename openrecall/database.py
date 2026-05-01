@@ -1,5 +1,6 @@
 import sqlite3
 from collections import namedtuple
+from datetime import UTC, datetime
 import numpy as np
 from typing import Any, List, Optional, Tuple
 
@@ -9,7 +10,14 @@ except ModuleNotFoundError:  # pragma: no cover - vendored test path shim
     from config import db_path
 
 # Define the structure of a database entry using namedtuple
-Entry = namedtuple("Entry", ["id", "app", "title", "text", "timestamp", "embedding"])
+Entry = namedtuple(
+    "Entry",
+    ["id", "app", "title", "text", "captured_date", "timestamp", "embedding"],
+)
+
+
+def _captured_date_from_timestamp(timestamp: int) -> str:
+    return datetime.fromtimestamp(int(timestamp), tz=UTC).date().isoformat()
 
 
 def create_db() -> None:
@@ -17,7 +25,7 @@ def create_db() -> None:
     Creates the SQLite database and the 'entries' table if they don't exist.
 
     The table schema includes columns for an auto-incrementing ID, application name,
-    window title, extracted text, timestamp, and text embedding.
+    window title, extracted text, captured_date, timestamp, and text embedding.
     """
     try:
         with sqlite3.connect(db_path) as conn:
@@ -28,13 +36,32 @@ def create_db() -> None:
                        app TEXT,
                        title TEXT,
                        text TEXT,
+                       captured_date TEXT,
                        timestamp INTEGER UNIQUE,
                        embedding BLOB
                    )"""
             )
+            columns = {
+                row[1] for row in cursor.execute("PRAGMA table_info(entries)").fetchall()
+            }
+            if "captured_date" not in columns:
+                cursor.execute("ALTER TABLE entries ADD COLUMN captured_date TEXT")
+                cursor.execute(
+                    """
+                    UPDATE entries
+                    SET captured_date = date(timestamp, 'unixepoch')
+                    WHERE captured_date IS NULL AND timestamp IS NOT NULL
+                    """
+                )
             # Add index on timestamp for faster lookups
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_timestamp ON entries (timestamp)"
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_captured_date_timestamp
+                ON entries (captured_date, timestamp)
+                """
             )
             conn.commit()
     except sqlite3.Error as e:
@@ -54,7 +81,13 @@ def get_all_entries() -> List[Entry]:
         with sqlite3.connect(db_path) as conn:
             conn.row_factory = sqlite3.Row  # Return rows as dictionary-like objects
             cursor = conn.cursor()
-            cursor.execute("SELECT id, app, title, text, timestamp, embedding FROM entries ORDER BY timestamp DESC")
+            cursor.execute(
+                """
+                SELECT id, app, title, text, captured_date, timestamp, embedding
+                FROM entries
+                ORDER BY timestamp DESC
+                """
+            )
             results = cursor.fetchall()
             for row in results:
                 # Deserialize the embedding blob back into a NumPy array
@@ -65,6 +98,7 @@ def get_all_entries() -> List[Entry]:
                         app=row["app"],
                         title=row["title"],
                         text=row["text"],
+                        captured_date=row["captured_date"],
                         timestamp=row["timestamp"],
                         embedding=embedding,
                     )
@@ -96,7 +130,12 @@ def get_timestamps() -> List[int]:
 
 
 def insert_entry(
-    text: str, timestamp: int, embedding: np.ndarray, app: str, title: str
+    text: str,
+    timestamp: int,
+    embedding: np.ndarray,
+    app: str,
+    title: str,
+    captured_date: str | None = None,
 ) -> Optional[int]:
     """
     Inserts a new entry into the database.
@@ -114,14 +153,22 @@ def insert_entry(
     """
     embedding_bytes: bytes = embedding.astype(np.float32).tobytes() # Ensure consistent dtype
     last_row_id: Optional[int] = None
+    normalized_captured_date = captured_date or _captured_date_from_timestamp(timestamp)
     try:
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                """INSERT INTO entries (text, timestamp, embedding, app, title)
-                   VALUES (?, ?, ?, ?, ?)
+                """INSERT INTO entries (text, captured_date, timestamp, embedding, app, title)
+                   VALUES (?, ?, ?, ?, ?, ?)
                    ON CONFLICT(timestamp) DO NOTHING""", # Avoid duplicates based on timestamp
-                (text, timestamp, embedding_bytes, app, title),
+                (
+                    text,
+                    normalized_captured_date,
+                    timestamp,
+                    embedding_bytes,
+                    app,
+                    title,
+                ),
             )
             conn.commit()
             if cursor.rowcount > 0: # Check if insert actually happened
@@ -137,7 +184,12 @@ def insert_entry(
 
 
 def upsert_entry(
-    text: str, timestamp: int, embedding: np.ndarray, app: str, title: str
+    text: str,
+    timestamp: int,
+    embedding: np.ndarray,
+    app: str,
+    title: str,
+    captured_date: str | None = None,
 ) -> Optional[int]:
     """
     Inserts or replaces an entry keyed by timestamp.
@@ -148,20 +200,29 @@ def upsert_entry(
     """
     embedding_bytes: bytes = embedding.astype(np.float32).tobytes()
     last_row_id: Optional[int] = None
+    normalized_captured_date = captured_date or _captured_date_from_timestamp(timestamp)
     try:
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO entries (text, timestamp, embedding, app, title)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO entries (text, captured_date, timestamp, embedding, app, title)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(timestamp) DO UPDATE SET
                     text=excluded.text,
+                    captured_date=excluded.captured_date,
                     embedding=excluded.embedding,
                     app=excluded.app,
                     title=excluded.title
                 """,
-                (text, timestamp, embedding_bytes, app, title),
+                (
+                    text,
+                    normalized_captured_date,
+                    timestamp,
+                    embedding_bytes,
+                    app,
+                    title,
+                ),
             )
             conn.commit()
             last_row_id = cursor.lastrowid or None

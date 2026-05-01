@@ -107,7 +107,7 @@ def record_screenshots_thread() -> None:
                 embedding,
                 active_app_name,
                 active_window_title,
-                filename,
+                captured_date=time.strftime("%Y-%m-%d", time.gmtime(timestamp)),
             )
 
         time.sleep(3)

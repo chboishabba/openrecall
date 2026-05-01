@@ -4,29 +4,33 @@ import os
 import tempfile
 import time
 import numpy as np
-from unittest.mock import patch
 
-# Temporarily adjust path to import from openrecall
 import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from pathlib import Path
 
-# Now import from openrecall.database, mocking db_path *before* the import
-# Create a temporary file path that will be used by the mock
+ROOT = Path("/home/c/Documents/code/ITIR-suite")
+OPENRECALL_ROOT = ROOT / "openrecall"
+sys.path.insert(0, str(OPENRECALL_ROOT))
+sys.path.insert(0, str(OPENRECALL_ROOT / "openrecall"))
+
+# Create a temporary file path that will be used by the test-local DB shim.
 temp_db_file = tempfile.NamedTemporaryFile(delete=False)
 mock_db_path = temp_db_file.name
 temp_db_file.close() # Close the file handle, but the file persists because delete=False
 
-with patch('openrecall.config.db_path', mock_db_path):
-    from openrecall.database import (
-        create_db,
-        insert_entry,
-        get_all_entries,
-        get_timestamps,
-        Entry,
-    )
-    # Also patch db_path within the database module itself if it was imported directly there
-    import openrecall.database
-    openrecall.database.db_path = mock_db_path
+import config as openrecall_config
+openrecall_config.db_path = mock_db_path
+
+from database import (
+    create_db,
+    insert_entry,
+    get_all_entries,
+    get_timestamps,
+    Entry,
+)
+# Also patch db_path within the database module itself if it was imported directly there
+import database as openrecall_database
+openrecall_database.db_path = mock_db_path
 
 
 class TestDatabase(unittest.TestCase):
@@ -81,6 +85,11 @@ class TestDatabase(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result[0], 'idx_timestamp')
 
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_captured_date_timestamp'")
+        result = cursor.fetchone()
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0], 'idx_captured_date_timestamp')
+
     def test_02_insert_entry(self):
         """Test inserting a single entry."""
         ts = int(time.time())
@@ -95,12 +104,13 @@ class TestDatabase(unittest.TestCase):
         cursor.execute("SELECT * FROM entries WHERE id = ?", (inserted_id,))
         result = cursor.fetchone()
         self.assertIsNotNone(result)
-        # (id, app, title, text, timestamp, embedding_blob)
+        # (id, app, title, text, captured_date, timestamp, embedding_blob)
         self.assertEqual(result[1], "TestApp")
         self.assertEqual(result[2], "TestTitle")
         self.assertEqual(result[3], "Test text")
-        self.assertEqual(result[4], ts)
-        retrieved_embedding = np.frombuffer(result[5], dtype=np.float32)
+        self.assertEqual(result[4], time.strftime("%Y-%m-%d", time.gmtime(ts)))
+        self.assertEqual(result[5], ts)
+        retrieved_embedding = np.frombuffer(result[6], dtype=np.float32)
         np.testing.assert_array_almost_equal(retrieved_embedding, embedding)
 
     def test_insert_duplicate_timestamp(self):
@@ -152,6 +162,7 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(entries[0].text, "Text 2")
         self.assertEqual(entries[0].app, "App2")
         self.assertEqual(entries[0].title, "Title2")
+        self.assertEqual(entries[0].captured_date, time.strftime("%Y-%m-%d", time.gmtime(ts2)))
         np.testing.assert_array_almost_equal(entries[0].embedding, emb2)
         self.assertIsInstance(entries[0].id, int)
 

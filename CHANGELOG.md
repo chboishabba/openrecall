@@ -20,6 +20,9 @@
   multi-user secure-cloud processing flows.
 - Add support for richer remote vision payloads (`segments`, `metadata`) and
   optional remote embeddings during OCR write-back.
+- Add `captured_date` alongside `timestamp` in both local and central history
+  storage so day-level merge/split operations stay simple without losing
+  precise replay ordering.
 - Add `openrecall/normalized_artifact.py` and focused tests so captured
   screenshots can emit a producer-owned `itir.normalized.artifact.v1`
   `source_artifact` sidecar without replacing canonical storage.

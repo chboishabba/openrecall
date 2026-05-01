@@ -32,6 +32,7 @@ def _create_test_db(db_path: Path, *, timestamp: int = 1714521600, text: str = "
                 app TEXT,
                 title TEXT,
                 text TEXT,
+                captured_date TEXT,
                 timestamp INTEGER UNIQUE,
                 embedding BLOB
             )
@@ -39,13 +40,14 @@ def _create_test_db(db_path: Path, *, timestamp: int = 1714521600, text: str = "
         )
         cursor.execute(
             """
-            INSERT INTO entries (app, title, text, timestamp, embedding)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO entries (app, title, text, captured_date, timestamp, embedding)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 "Browser",
                 "Inbox",
                 text,
+                "2024-05-01",
                 timestamp,
                 np.array([0.1, 0.2], dtype=np.float32).tobytes(),
             ),
@@ -77,6 +79,7 @@ def test_export_session_bundle_creates_manifest_and_capture_archive(tmp_path: Pa
     assert manifest["entry_count"] == 1
     assert manifest["user_id"] == "alice"
     assert manifest["device_id"] == "desktop-a"
+    assert manifest["entries"][0]["captured_date"] == "2024-05-01"
     assert manifest["entries"][0]["capture_files"] == ["1714521600_0.webp"]
     assert manifest["entries"][0]["captured_at"] == float(1714521600)
 
@@ -147,10 +150,10 @@ def test_ingest_session_bundle_tracks_multiple_sessions(tmp_path: Path) -> None:
         ).fetchone()
         assert bundle_row == ("acme", "bob", "laptop-b", "session-002", 1)
         entry_row = conn.execute(
-            "SELECT app, title, text, capture_files_json FROM bundle_entries"
+            "SELECT captured_date, app, title, text, capture_files_json FROM bundle_entries"
         ).fetchone()
-        assert entry_row[0:3] == ("Browser", "Inbox", "Daily report notes")
-        assert json.loads(entry_row[3]) == ["1714521600_0.webp"]
+        assert entry_row[0:4] == ("2024-05-01", "Browser", "Inbox", "Daily report notes")
+        assert json.loads(entry_row[4]) == ["1714521600_0.webp"]
 
 
 def test_ingest_session_bundle_verifies_signed_manifest(tmp_path: Path) -> None:
@@ -250,6 +253,15 @@ def test_query_history_timeline_keeps_device_provenance_and_filters(tmp_path: Pa
     assert len(filtered) == 1
     assert filtered[0]["device_id"] == "laptop-b"
     assert filtered[0]["text"] == "Laptop event"
+    assert filtered[0]["captured_date"] == "2024-05-01"
+
+    day_filtered = query_history_timeline(
+        registry_root=str(registry_root),
+        org_id="acme",
+        user_id="alice",
+        captured_date="2024-05-01",
+    )
+    assert len(day_filtered) == 2
 
 
 def test_writeback_ocr_results_populates_local_recall_db(tmp_path: Path, monkeypatch) -> None:
@@ -308,13 +320,14 @@ def test_writeback_ocr_results_populates_local_recall_db(tmp_path: Path, monkeyp
 
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
-            "SELECT text, app, title, embedding FROM entries WHERE timestamp = ?",
+            "SELECT text, app, title, captured_date, embedding FROM entries WHERE timestamp = ?",
             (1714521600,),
         ).fetchone()
         assert row[0] == "Processed remotely"
         assert row[1] == "Browser"
         assert row[2] == "Inbox"
-        restored = np.frombuffer(row[3], dtype=np.float32)
+        assert row[3] == "2024-05-01"
+        restored = np.frombuffer(row[4], dtype=np.float32)
         assert restored.shape == (384,)
         assert np.allclose(restored, np.array([0.5] * 384, dtype=np.float32))
 
