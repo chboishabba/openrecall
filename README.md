@@ -85,6 +85,239 @@ analysis.
 - this keeps one canonical comparison contract across OpenRecall and
   WorldMonitor instead of duplicating comparison logic in each producer
 
+## OCR backend and offline processing
+
+OpenRecall's default path still runs OCR inline with live screenshot capture,
+but the OCR surface is now configurable so heavier ML can move out of the hot
+path when needed.
+
+- `OPENRECALL_OCR_BACKEND=local` keeps the existing local Doctr OCR path.
+- `OPENRECALL_OCR_BACKEND=http` sends the image to an external OCR API instead.
+- `OPENRECALL_OCR_API_URL` points at that OCR service.
+- `OPENRECALL_OCR_API_TOKEN` optionally adds `Authorization: Bearer ...`.
+- `OPENRECALL_OCR_API_HEADERS` optionally adds extra JSON-encoded headers.
+- `--capture-only` records screenshots without running OCR or embeddings in the
+  live loop, which is useful when you want to defer OCR, segmentation, or other
+  heavy ML until a later offline batch.
+
+The HTTP OCR seam is intentionally simple: POST a JSON body with
+`image_base64` and `mime_type`, and return a JSON object containing at least
+`text`, plus optional `segments` and `metadata`. That lets an external worker,
+GPU box, or hosted API own OCR/segmentation complexity while OpenRecall keeps
+capture/storage local.
+
+### Offline OCR processing
+
+To process saved screenshots after capture:
+
+```bash
+python -m openrecall.ocr_jobs process ~/.local/share/openrecall/screenshots \
+  --backend http \
+  --output openrecall_ocr_results.json
+```
+
+That emits one JSON record per image with text, segment count, backend, and
+elapsed seconds.
+
+### OCR benchmarking
+
+To measure OCR throughput and basic text accuracy, create a manifest JSON file:
+
+```json
+[
+  {
+    "image_path": "fixtures/receipt.png",
+    "expected_text": "TOTAL 12.50"
+  }
+]
+```
+
+Then run:
+
+```bash
+python -m openrecall.ocr_jobs benchmark \
+  --manifest benchmark_manifest.json \
+  --backend local
+```
+
+The benchmark output reports:
+
+- `chars_per_second`
+- `exact_match_rate`
+- `char_error_rate`
+- per-image elapsed time and normalized similarity
+
+This is a lightweight runtime/quality gate rather than a formal OCR research
+benchmark, but it is enough to compare local vs external OCR paths and spot
+heavy-model regressions.
+
+## Session bundles for secure central processing
+
+If you want endpoints to capture locally but do OCR, segmentation, or heavier
+ML centrally, OpenRecall now supports a compressed day/session bundle format.
+
+The local machine can package one day of captures plus metadata:
+
+```bash
+python -m openrecall.bundle_jobs export-day \
+  --date 2026-05-01 \
+  --session-id alice-home-2026-05-01 \
+  --org-id personal \
+  --user-id alice \
+  --device-id workstation-a \
+  --output alice-home-2026-05-01.orbundle.zip \
+  --retention-days 30 \
+  --signing-secret "$OPENRECALL_BUNDLE_SECRET" \
+  --compression lzma
+```
+
+That bundle contains:
+
+- `manifest.json` with org, user, device, session, host, date, and capture metadata
+- the captured screenshots for that window under `captures/`
+- optional retention metadata (`retention_days`, `delete_after`)
+- optional HMAC signature when `--signing-secret` is provided
+
+On the secure processing server, ingest the bundle into a central registry:
+
+```bash
+python -m openrecall.bundle_jobs ingest-bundle \
+  --bundle alice-home-2026-05-01.orbundle.zip \
+  --signing-secret "$OPENRECALL_BUNDLE_SECRET" \
+  --registry-root /srv/openrecall-processing
+```
+
+The registry keeps track of multiple bundles across:
+
+- organization
+- user
+- device
+- session
+- captured date
+
+The central registry and timeline live in one shared SQLite store, but all
+history queries are explicitly scoped by `org_id` and `user_id`. That means the
+storage can be shared without forcing one global default history.
+
+### Multi-user default model
+
+This bundle/registry shape is multi-user, but it does not force users into one
+shared history by default.
+
+The primary story is one person federating memory across their own machines, or
+across a small self-managed household/homelab. Corporate or institutional use
+is possible, but it is not the normative framing for the feature and it does
+not relax the suite's anti-panopticon boundary.
+
+What it supports now:
+
+- each endpoint/user can keep a separate local `recall.db`
+- each exported bundle carries:
+  - `org_id`
+  - `user_id`
+  - `device_id`
+  - `session_id`
+  - `host_id`
+  - `captured_date`
+- the central ingest registry stores bundles and timeline entries keyed by
+  those identifiers in one shared DB
+
+So the default operating model is:
+
+- local capture/search history remains per-user
+- central processing can handle many users
+- the central registry tracks bundles separately by org, user, device, and session
+- OCR write-back goes back into a chosen local `recall.db`, not one global
+  merged history
+
+### Unified timeline query
+
+To inspect the shared central timeline for one user across multiple devices:
+
+```bash
+python -m openrecall.bundle_jobs query-timeline \
+  --registry-root /srv/openrecall-processing \
+  --org-id personal \
+  --user-id alice
+```
+
+To focus on one machine only:
+
+```bash
+python -m openrecall.bundle_jobs query-timeline \
+  --registry-root /srv/openrecall-processing \
+  --org-id personal \
+  --user-id alice \
+  --device-id workstation-a
+```
+
+The default timeline semantics are:
+
+- keep each device event separate
+- preserve device provenance
+- order chronologically
+- allow later replay to focus one device or view several devices side by side
+- never auto-merge overlapping captures from different devices in v1
+
+That means the current flow supports one user's cross-device replay and, where
+explicitly enabled, larger shared processing deployments without immediately
+collapsing everyone into a single recall stream.
+
+What it could also support later, if you explicitly want it:
+
+- an org-wide aggregate processing/reporting layer on top of the central
+  registry
+- a cross-user search/index layer
+
+Those would be extra policy/data-product layers, not the default behavior of
+the current bundle plus write-back flow.
+
+OpenRecall does not treat a shared central registry as permission to create an
+authoritative, merged institutional memory. Default queries are scoped by
+`org_id` and `user_id`, per-device provenance stays visible, and cross-device
+views remain chronological observer surfaces rather than hidden interpretive
+upgrades.
+
+This gives you a simple capture-now / process-centrally-later workflow without
+requiring every endpoint to host the heavy OCR/ML stack locally.
+
+### Writing processed OCR back into `recall.db`
+
+After remote OCR completes, write the results back into the local OpenRecall DB
+using the original session manifest plus the OCR results JSON:
+
+```bash
+python -m openrecall.bundle_jobs writeback-ocr \
+  --manifest manifest.json \
+  --ocr-results openrecall_ocr_results.json \
+  --db-path ~/.local/share/openrecall/recall.db
+```
+
+This groups OCR results back onto their original capture entries by screenshot
+filename and upserts the final search entries into `recall.db`.
+
+If the remote processor returns extra payloads, the write-back path now also
+supports:
+
+- remote embeddings via `embedding`
+- richer vision payloads via `segments` and `metadata`
+
+When a remote embedding is present and shaped correctly, OpenRecall uses it
+instead of rebuilding the embedding locally. Vision payloads are preserved as
+JSON sidecars alongside the manifest directory so later segmentation/layout
+workflows can reuse them.
+
+For self-managed deployments, the remote vision contract is intentionally broad.
+That means a trusted local processor can return richer payloads, but OpenRecall
+still treats them as observer-class outputs. They do not become hidden
+authority, person scoring, or cross-context identity resolution by default.
+
+That completes the loop:
+
+- capture locally
+- process OCR/ML elsewhere
+- search locally later
+
 <p align="center">
   <img src="images/lisa_rewind.webp" alt="Lisa Rewind" width="400">
 </p>
@@ -129,6 +362,10 @@ Open your browser to:
 `--storage-path` (default: user data path for your OS): allows you to specify the path where the screenshots and database should be stored. We recommend [creating an encrypted volume](docs/encryption.md) to store your data.
 
 `--primary-monitor-only` (default: False): only record the primary monitor (rather than individual screenshots for other monitors)
+
+`--capture-only` (default: False): save screenshots but skip OCR and embeddings
+in the live loop so OCR/segmentation can run later in offline jobs or on a
+separate machine.
 
 ## Uninstall instructions
 

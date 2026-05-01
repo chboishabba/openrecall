@@ -3,7 +3,10 @@ from collections import namedtuple
 import numpy as np
 from typing import Any, List, Optional, Tuple
 
-from openrecall.config import db_path
+try:
+    from openrecall.config import db_path
+except ModuleNotFoundError:  # pragma: no cover - vendored test path shim
+    from config import db_path
 
 # Define the structure of a database entry using namedtuple
 Entry = namedtuple("Entry", ["id", "app", "title", "text", "timestamp", "embedding"])
@@ -130,4 +133,38 @@ def insert_entry(
     except sqlite3.Error as e:
         # More specific error handling can be added (e.g., IntegrityError for UNIQUE constraint)
         print(f"Database error during insertion: {e}")
+    return last_row_id
+
+
+def upsert_entry(
+    text: str, timestamp: int, embedding: np.ndarray, app: str, title: str
+) -> Optional[int]:
+    """
+    Inserts or replaces an entry keyed by timestamp.
+
+    This is used by offline write-back flows where capture metadata may already
+    exist locally and the OCR/embedding payload arrives later from a deferred or
+    remote processing job.
+    """
+    embedding_bytes: bytes = embedding.astype(np.float32).tobytes()
+    last_row_id: Optional[int] = None
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO entries (text, timestamp, embedding, app, title)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(timestamp) DO UPDATE SET
+                    text=excluded.text,
+                    embedding=excluded.embedding,
+                    app=excluded.app,
+                    title=excluded.title
+                """,
+                (text, timestamp, embedding_bytes, app, title),
+            )
+            conn.commit()
+            last_row_id = cursor.lastrowid or None
+    except sqlite3.Error as e:
+        print(f"Database error during upsert: {e}")
     return last_row_id

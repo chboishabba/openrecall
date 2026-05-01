@@ -2,7 +2,7 @@ import os
 import sys
 import argparse
 
-parser = argparse.ArgumentParser(description="OpenRecall")
+parser = argparse.ArgumentParser(description="OpenRecall", add_help=False)
 
 parser.add_argument(
     "--storage-path",
@@ -14,6 +14,13 @@ parser.add_argument(
     "--primary-monitor-only",
     action="store_true",
     help="Only record the primary monitor",
+    default=False,
+)
+
+parser.add_argument(
+    "--capture-only",
+    action="store_true",
+    help="Capture screenshots without running OCR or embeddings in the live loop",
     default=False,
 )
 
