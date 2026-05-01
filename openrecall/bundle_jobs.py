@@ -23,10 +23,12 @@ except ModuleNotFoundError:  # pragma: no cover - vendored test path shim
 try:
     from openrecall.database import create_db, upsert_entry
     from openrecall.nlp import EMBEDDING_DIM, get_embedding
+    from openrecall.ocr_normalize import normalize_ocr_text
     import openrecall.database as openrecall_database
 except ModuleNotFoundError:  # pragma: no cover - vendored test path shim
     from database import create_db, upsert_entry
     from nlp import EMBEDDING_DIM, get_embedding
+    from ocr_normalize import normalize_ocr_text
     import database as openrecall_database
 
 
@@ -593,6 +595,7 @@ def writeback_ocr_results(
         if not combined_text:
             continue
 
+        normalization = normalize_ocr_text(combined_text)
         embedding = embedding_vector if embedding_vector is not None else get_embedding(combined_text)
         upsert_entry(
             combined_text,
@@ -602,6 +605,12 @@ def writeback_ocr_results(
             str(entry.get("title") or ""),
             captured_date=str(
                 entry.get("captured_date") or manifest.get("captured_date") or ""
+            ),
+            normalized_text=normalization.normalized_text,
+            normalization_version=normalization.version,
+            normalization_issues_json=json.dumps(
+                normalization.issue_taxonomy,
+                sort_keys=True,
             ),
         )
 

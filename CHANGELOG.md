@@ -36,3 +36,4 @@
   into optional extras.
 - Add local-embedding test coverage and update zero-vector cosine-similarity
   behavior docs/tests.
+- add deterministic OCR normalization sidecars and benchmark diff/taxonomy reporting

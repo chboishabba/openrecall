@@ -12,7 +12,18 @@ except ModuleNotFoundError:  # pragma: no cover - vendored test path shim
 # Define the structure of a database entry using namedtuple
 Entry = namedtuple(
     "Entry",
-    ["id", "app", "title", "text", "captured_date", "timestamp", "embedding"],
+    [
+        "id",
+        "app",
+        "title",
+        "text",
+        "captured_date",
+        "timestamp",
+        "embedding",
+        "normalized_text",
+        "normalization_version",
+        "normalization_issues_json",
+    ],
 )
 
 
@@ -35,10 +46,13 @@ def create_db() -> None:
                        id INTEGER PRIMARY KEY AUTOINCREMENT,
                        app TEXT,
                        title TEXT,
-                       text TEXT,
-                       captured_date TEXT,
-                       timestamp INTEGER UNIQUE,
-                       embedding BLOB
+                   text TEXT,
+                   captured_date TEXT,
+                   timestamp INTEGER UNIQUE,
+                       embedding BLOB,
+                       normalized_text TEXT,
+                       normalization_version TEXT,
+                       normalization_issues_json TEXT
                    )"""
             )
             columns = {
@@ -52,6 +66,16 @@ def create_db() -> None:
                     SET captured_date = date(timestamp, 'unixepoch')
                     WHERE captured_date IS NULL AND timestamp IS NOT NULL
                     """
+                )
+            if "normalized_text" not in columns:
+                cursor.execute("ALTER TABLE entries ADD COLUMN normalized_text TEXT")
+            if "normalization_version" not in columns:
+                cursor.execute(
+                    "ALTER TABLE entries ADD COLUMN normalization_version TEXT"
+                )
+            if "normalization_issues_json" not in columns:
+                cursor.execute(
+                    "ALTER TABLE entries ADD COLUMN normalization_issues_json TEXT"
                 )
             # Add index on timestamp for faster lookups
             cursor.execute(
@@ -83,7 +107,8 @@ def get_all_entries() -> List[Entry]:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT id, app, title, text, captured_date, timestamp, embedding
+                SELECT id, app, title, text, captured_date, timestamp, embedding,
+                       normalized_text, normalization_version, normalization_issues_json
                 FROM entries
                 ORDER BY timestamp DESC
                 """
@@ -101,6 +126,9 @@ def get_all_entries() -> List[Entry]:
                         captured_date=row["captured_date"],
                         timestamp=row["timestamp"],
                         embedding=embedding,
+                        normalized_text=row["normalized_text"],
+                        normalization_version=row["normalization_version"],
+                        normalization_issues_json=row["normalization_issues_json"],
                     )
                 )
     except sqlite3.Error as e:
@@ -136,6 +164,9 @@ def insert_entry(
     app: str,
     title: str,
     captured_date: str | None = None,
+    normalized_text: str | None = None,
+    normalization_version: str | None = None,
+    normalization_issues_json: str | None = None,
 ) -> Optional[int]:
     """
     Inserts a new entry into the database.
@@ -158,8 +189,11 @@ def insert_entry(
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                """INSERT INTO entries (text, captured_date, timestamp, embedding, app, title)
-                   VALUES (?, ?, ?, ?, ?, ?)
+                """INSERT INTO entries (
+                       text, captured_date, timestamp, embedding, app, title,
+                       normalized_text, normalization_version, normalization_issues_json
+                   )
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(timestamp) DO NOTHING""", # Avoid duplicates based on timestamp
                 (
                     text,
@@ -168,6 +202,9 @@ def insert_entry(
                     embedding_bytes,
                     app,
                     title,
+                    normalized_text,
+                    normalization_version,
+                    normalization_issues_json,
                 ),
             )
             conn.commit()
@@ -190,6 +227,9 @@ def upsert_entry(
     app: str,
     title: str,
     captured_date: str | None = None,
+    normalized_text: str | None = None,
+    normalization_version: str | None = None,
+    normalization_issues_json: str | None = None,
 ) -> Optional[int]:
     """
     Inserts or replaces an entry keyed by timestamp.
@@ -206,14 +246,20 @@ def upsert_entry(
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO entries (text, captured_date, timestamp, embedding, app, title)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO entries (
+                    text, captured_date, timestamp, embedding, app, title,
+                    normalized_text, normalization_version, normalization_issues_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(timestamp) DO UPDATE SET
                     text=excluded.text,
                     captured_date=excluded.captured_date,
                     embedding=excluded.embedding,
                     app=excluded.app,
-                    title=excluded.title
+                    title=excluded.title,
+                    normalized_text=excluded.normalized_text,
+                    normalization_version=excluded.normalization_version,
+                    normalization_issues_json=excluded.normalization_issues_json
                 """,
                 (
                     text,
@@ -222,6 +268,9 @@ def upsert_entry(
                     embedding_bytes,
                     app,
                     title,
+                    normalized_text,
+                    normalization_version,
+                    normalization_issues_json,
                 ),
             )
             conn.commit()

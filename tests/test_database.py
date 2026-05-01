@@ -27,6 +27,7 @@ from database import (
     get_all_entries,
     get_timestamps,
     Entry,
+    upsert_entry,
 )
 # Also patch db_path within the database module itself if it was imported directly there
 import database as openrecall_database
@@ -104,7 +105,7 @@ class TestDatabase(unittest.TestCase):
         cursor.execute("SELECT * FROM entries WHERE id = ?", (inserted_id,))
         result = cursor.fetchone()
         self.assertIsNotNone(result)
-        # (id, app, title, text, captured_date, timestamp, embedding_blob)
+        # (id, app, title, text, captured_date, timestamp, embedding_blob, normalized_text, normalization_version, normalization_issues_json)
         self.assertEqual(result[1], "TestApp")
         self.assertEqual(result[2], "TestTitle")
         self.assertEqual(result[3], "Test text")
@@ -112,6 +113,9 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(result[5], ts)
         retrieved_embedding = np.frombuffer(result[6], dtype=np.float32)
         np.testing.assert_array_almost_equal(retrieved_embedding, embedding)
+        self.assertIsNone(result[7])
+        self.assertIsNone(result[8])
+        self.assertIsNone(result[9])
 
     def test_insert_duplicate_timestamp(self):
         """Test inserting an entry with a duplicate timestamp (should be ignored)."""
@@ -164,6 +168,7 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(entries[0].title, "Title2")
         self.assertEqual(entries[0].captured_date, time.strftime("%Y-%m-%d", time.gmtime(ts2)))
         np.testing.assert_array_almost_equal(entries[0].embedding, emb2)
+        self.assertIsNone(entries[0].normalized_text)
         self.assertIsInstance(entries[0].id, int)
 
         self.assertEqual(entries[1].timestamp, ts1)
@@ -194,6 +199,39 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(len(timestamps), 3)
         # Timestamps should be ordered DESC
         self.assertEqual(timestamps, [ts2, ts1, ts3])
+
+    def test_upsert_entry_persists_normalization_sidecars(self):
+        ts = int(time.time())
+        embedding = np.array([0.7, 0.8], dtype=np.float32)
+        inserted_id = upsert_entry(
+            "write- back",
+            ts,
+            embedding,
+            "Shell",
+            "Terminal",
+            normalized_text="write-back",
+            normalization_version="openrecall.ocr_normalize.v1",
+            normalization_issues_json='{"token_splits_joins":1}',
+        )
+
+        self.assertIsNotNone(inserted_id)
+        cursor = self.conn.cursor()
+        row = cursor.execute(
+            """
+            SELECT text, normalized_text, normalization_version, normalization_issues_json
+            FROM entries WHERE timestamp = ?
+            """,
+            (ts,),
+        ).fetchone()
+        self.assertEqual(
+            row,
+            (
+                "write- back",
+                "write-back",
+                "openrecall.ocr_normalize.v1",
+                '{"token_splits_joins":1}',
+            ),
+        )
 
 
 if __name__ == '__main__':

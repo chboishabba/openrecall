@@ -1,3 +1,4 @@
+import json
 import os
 import time
 from typing import List
@@ -9,6 +10,7 @@ from PIL import Image
 from openrecall.config import args, screenshots_path
 from openrecall.database import insert_entry
 from openrecall.nlp import get_embedding
+from openrecall.ocr_normalize import normalize_ocr_text
 from openrecall.ocr import extract_ocr_result_from_image
 from openrecall.utils import (
     get_active_app_name,
@@ -99,6 +101,7 @@ def record_screenshots_thread() -> None:
                 continue
 
             embedding: np.ndarray = get_embedding(ocr_result.text)
+            normalization = normalize_ocr_text(ocr_result.text)
             active_app_name: str = get_active_app_name() or "Unknown App"
             active_window_title: str = get_active_window_title() or "Unknown Title"
             insert_entry(
@@ -108,6 +111,12 @@ def record_screenshots_thread() -> None:
                 active_app_name,
                 active_window_title,
                 captured_date=time.strftime("%Y-%m-%d", time.gmtime(timestamp)),
+                normalized_text=normalization.normalized_text,
+                normalization_version=normalization.version,
+                normalization_issues_json=json.dumps(
+                    normalization.issue_taxonomy,
+                    sort_keys=True,
+                ),
             )
 
         time.sleep(3)

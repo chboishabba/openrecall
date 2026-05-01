@@ -10,6 +10,7 @@ OPENRECALL_ROOT = ROOT / "openrecall"
 sys.path.insert(0, str(OPENRECALL_ROOT / "openrecall"))
 
 import ocr
+from ocr_normalize import normalize_ocr_text
 from ocr_jobs import benchmark_manifest, process_image_paths
 
 
@@ -75,6 +76,20 @@ def test_process_image_paths_uses_selected_backend(tmp_path, monkeypatch):
     assert records[0]["image_path"] == str(image_path)
     assert records[0]["backend"] == "http"
     assert records[0]["char_count"] == len("offline text")
+    assert records[0]["raw_text"] == "offline text"
+    assert records[0]["normalized_text"] == "offline text"
+
+
+def test_normalize_ocr_text_repairs_code_shaped_artifacts():
+    result = normalize_ocr_text(
+        "captured_ date\nwrite- back\npython -m openrecall\nfoo. bar\n"
+    )
+
+    assert result.normalized_text == (
+        "captured_date\nwrite-back\npython -m openrecall\nfoo.bar"
+    )
+    assert result.issue_taxonomy["token_splits_joins"] >= 1
+    assert result.issue_taxonomy["code_token_corruption"] >= 1
 
 
 def test_benchmark_manifest_reports_speed_and_accuracy(tmp_path, monkeypatch):
@@ -98,6 +113,9 @@ def test_benchmark_manifest_reports_speed_and_accuracy(tmp_path, monkeypatch):
 
     assert result["image_count"] == 1
     assert result["backend"] == "local"
-    assert result["exact_match_rate"] == 1.0
     assert result["chars_per_second"] == len("hello world") / 0.5
-    assert result["char_error_rate"] == 0.0
+    assert result["raw_metrics"]["exact_match_rate"] == 1.0
+    assert result["raw_metrics"]["char_error_rate"] == 0.0
+    assert result["normalized_metrics"]["exact_match_rate"] == 1.0
+    assert result["records"][0]["raw_diff"] == ""
+    assert result["records"][0]["normalized_diff"] == ""

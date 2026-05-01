@@ -419,3 +419,15 @@ mail@datatalk.be
 ## License
 
 OpenRecall is released under the [AGPLv3](https://opensource.org/licenses/AGPL-3.0), ensuring that it remains open and accessible to everyone.
+## OCR normalization and benchmarking
+
+OpenRecall keeps raw OCR text as the canonical captured value and stores normalized OCR text as an additive sidecar. The normalized layer is deterministic, local, and audit-friendly: it repairs common whitespace, punctuation, and code-token OCR breakage without replacing the original text.
+
+Offline OCR processing emits both raw and normalized text. Benchmark reports now include:
+
+- strict raw OCR metrics
+- normalized OCR metrics
+- raw and normalized diffs
+- issue taxonomy counts for whitespace/newline corruption, punctuation corruption, token splits/joins, code-token corruption, and extra text
+
+The primary benchmark remains whole-image and strict. Extra on-screen text outside a supplied ground-truth excerpt still counts against the raw score; the normalized layer exists to show practical usefulness without hiding the raw result.

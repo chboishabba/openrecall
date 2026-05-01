@@ -34,14 +34,20 @@ def _create_test_db(db_path: Path, *, timestamp: int = 1714521600, text: str = "
                 text TEXT,
                 captured_date TEXT,
                 timestamp INTEGER UNIQUE,
-                embedding BLOB
+                embedding BLOB,
+                normalized_text TEXT,
+                normalization_version TEXT,
+                normalization_issues_json TEXT
             )
             """
         )
         cursor.execute(
             """
-            INSERT INTO entries (app, title, text, captured_date, timestamp, embedding)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO entries (
+                app, title, text, captured_date, timestamp, embedding,
+                normalized_text, normalization_version, normalization_issues_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "Browser",
@@ -50,6 +56,9 @@ def _create_test_db(db_path: Path, *, timestamp: int = 1714521600, text: str = "
                 "2024-05-01",
                 timestamp,
                 np.array([0.1, 0.2], dtype=np.float32).tobytes(),
+                None,
+                None,
+                None,
             ),
         )
         conn.commit()
@@ -320,7 +329,11 @@ def test_writeback_ocr_results_populates_local_recall_db(tmp_path: Path, monkeyp
 
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
-            "SELECT text, app, title, captured_date, embedding FROM entries WHERE timestamp = ?",
+            """
+            SELECT text, app, title, captured_date, embedding,
+                   normalized_text, normalization_version, normalization_issues_json
+            FROM entries WHERE timestamp = ?
+            """,
             (1714521600,),
         ).fetchone()
         assert row[0] == "Processed remotely"
@@ -330,6 +343,9 @@ def test_writeback_ocr_results_populates_local_recall_db(tmp_path: Path, monkeyp
         restored = np.frombuffer(row[4], dtype=np.float32)
         assert restored.shape == (384,)
         assert np.allclose(restored, np.array([0.5] * 384, dtype=np.float32))
+        assert row[5] == "Processed remotely"
+        assert row[6] == "openrecall.ocr_normalize.v1"
+        assert json.loads(row[7])["extra_text"] == 0
 
     vision_path = Path(payload["vision_payload_dir"]) / "1714521600.vision.json"
     vision_payload = json.loads(vision_path.read_text())
