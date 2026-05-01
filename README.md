@@ -20,6 +20,21 @@ OpenRecall captures your digital history through regularly taken snapshots, whic
 
 https://github.com/openrecall/openrecall/assets/16676419/cfc579cb-165b-43e4-9325-9160da6487d2
 
+## Local UI and stable entry drill-down
+
+OpenRecall remains the native browser/search/replay surface for OpenRecall
+history.
+
+Current local routes include:
+- `/` timeline slider
+- `/search?q=...`
+- `/entry/<entry_id>` stable entry-level drill-down
+
+The new `/entry/<entry_id>` route is intended for producer-owned deep links
+from external read-only dashboards such as `StatiBaker`. It lets another tool
+hand the user back to one concrete OpenRecall capture without duplicating
+OpenRecall's own browsing/search UI.
+
 ## Why Choose OpenRecall?
 
 OpenRecall offers several key advantages over closed-source alternatives:

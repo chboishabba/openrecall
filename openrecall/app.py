@@ -1,11 +1,13 @@
 from threading import Thread
 
 import numpy as np
-from flask import Flask, render_template_string, request, send_from_directory
+from pathlib import Path
+
+from flask import Flask, abort, render_template_string, request, send_from_directory
 from jinja2 import BaseLoader
 
 from openrecall.config import appdata_folder, screenshots_path
-from openrecall.database import create_db, get_all_entries, get_timestamps
+from openrecall.database import create_db, get_all_entries, get_entry_by_id, get_timestamps
 from openrecall.nlp import cosine_similarity, get_embedding
 from openrecall.screenshot import record_screenshots_thread
 from openrecall.utils import human_readable_time, timestamp_to_human_readable
@@ -14,6 +16,15 @@ app = Flask(__name__)
 
 app.jinja_env.filters["human_readable_time"] = human_readable_time
 app.jinja_env.filters["timestamp_to_human_readable"] = timestamp_to_human_readable
+
+
+def _capture_filenames_for_timestamp(timestamp: int) -> list[str]:
+    screenshots_dir = Path(screenshots_path)
+    matches = sorted(screenshots_dir.glob(f"{int(timestamp)}*.webp"))
+    if not matches:
+        for suffix in (".png", ".jpg", ".jpeg"):
+            matches.extend(sorted(screenshots_dir.glob(f"{int(timestamp)}*{suffix}")))
+    return [path.name for path in sorted(matches)]
 
 base_template = """
 <!DOCTYPE html>
@@ -172,6 +183,80 @@ def search():
 {% endblock %}
 """,
         entries=sorted_entries,
+    )
+
+
+@app.route("/entry/<int:entry_id>")
+def entry_detail(entry_id: int):
+    entry = get_entry_by_id(entry_id)
+    if entry is None:
+        abort(404)
+    capture_filenames = _capture_filenames_for_timestamp(entry.timestamp)
+    primary_capture = capture_filenames[0] if capture_filenames else None
+    display_text = entry.normalized_text or entry.text or ""
+    return render_template_string(
+        """
+{% extends "base_template" %}
+{% block content %}
+  <div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <h1 class="h3 mb-1">OpenRecall Entry {{ entry.id }}</h1>
+        <div class="text-muted">{{ entry.timestamp | timestamp_to_human_readable }}</div>
+      </div>
+      <div>
+        <a class="btn btn-outline-secondary btn-sm" href="/">Timeline</a>
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-lg-8 mb-3">
+        {% if primary_capture %}
+          <img src="/static/{{ primary_capture }}" alt="OpenRecall capture {{ entry.id }}" class="img-fluid border rounded">
+          {% if capture_filenames|length > 1 %}
+            <div class="mt-2 small text-muted">
+              Additional captures for this timestamp:
+              {% for filename in capture_filenames[1:] %}
+                <code>{{ filename }}</code>{% if not loop.last %}, {% endif %}
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% else %}
+          <div class="alert alert-warning">No screenshot file was found for this entry timestamp.</div>
+        {% endif %}
+      </div>
+      <div class="col-lg-4">
+        <div class="card mb-3">
+          <div class="card-body">
+            <h2 class="h5">Metadata</h2>
+            <dl class="mb-0">
+              <dt>ID</dt><dd><code>{{ entry.id }}</code></dd>
+              <dt>Captured date</dt><dd><code>{{ entry.captured_date }}</code></dd>
+              <dt>Timestamp</dt><dd><code>{{ entry.timestamp }}</code></dd>
+              <dt>Application</dt><dd>{{ entry.app or "unknown" }}</dd>
+              <dt>Window title</dt><dd>{{ entry.title or "(none)" }}</dd>
+              <dt>Normalization</dt><dd>{{ entry.normalization_version or "(raw only)" }}</dd>
+            </dl>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-body">
+            <h2 class="h5">Text</h2>
+            {% if display_text %}
+              <pre style="white-space: pre-wrap; word-break: break-word;">{{ display_text }}</pre>
+            {% else %}
+              <div class="text-muted">No OCR text stored for this entry.</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+""",
+        entry=entry,
+        capture_filenames=capture_filenames,
+        primary_capture=primary_capture,
+        display_text=display_text,
     )
 
 

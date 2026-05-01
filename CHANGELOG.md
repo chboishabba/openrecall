@@ -37,3 +37,6 @@
 - Add local-embedding test coverage and update zero-vector cosine-similarity
   behavior docs/tests.
 - add deterministic OCR normalization sidecars and benchmark diff/taxonomy reporting
+- add stable `/entry/<entry_id>` drill-down route so external read-only
+  dashboards can deep-link back into producer-owned OpenRecall history without
+  cloning the OpenRecall UI

@@ -157,6 +157,52 @@ def get_timestamps() -> List[int]:
     return timestamps
 
 
+def get_entry_by_id(entry_id: int) -> Optional[Entry]:
+    """
+    Retrieve one entry by its primary-key ID.
+
+    Returns:
+        Optional[Entry]: The matching entry, or None when no row exists.
+    """
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, app, title, text, captured_date, timestamp, embedding,
+                       normalized_text, normalization_version, normalization_issues_json
+                FROM entries
+                WHERE id = ?
+                """,
+                (int(entry_id),),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            embedding_blob = row["embedding"]
+            embedding = (
+                np.frombuffer(embedding_blob, dtype=np.float32)
+                if embedding_blob is not None
+                else np.array([], dtype=np.float32)
+            )
+            return Entry(
+                id=row["id"],
+                app=row["app"],
+                title=row["title"],
+                text=row["text"],
+                captured_date=row["captured_date"],
+                timestamp=row["timestamp"],
+                embedding=embedding,
+                normalized_text=row["normalized_text"],
+                normalization_version=row["normalization_version"],
+                normalization_issues_json=row["normalization_issues_json"],
+            )
+    except sqlite3.Error as e:
+        print(f"Database error while fetching entry by id: {e}")
+    return None
+
+
 def insert_entry(
     text: str,
     timestamp: int,
