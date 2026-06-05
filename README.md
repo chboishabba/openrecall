@@ -100,6 +100,48 @@ analysis.
 - this keeps one canonical comparison contract across OpenRecall and
   WorldMonitor instead of duplicating comparison logic in each producer
 
+### Browser-assist observations
+
+OpenRecall can emit read-only browser-assist observations for StatiBaker without
+copying raw page bodies into the dashboard lane. The default output is
+metadata-only: URL/title/text are hashed, page structure is summarized with
+bounded counts, and any browser/screenshot artifacts remain producer-owned.
+
+Install the optional Playwright dependency when you want direct Chrome CDP
+capture:
+
+```bash
+pip install -e ".[browser-assist]"
+playwright install chromium
+```
+
+Launch Chrome with remote debugging enabled, then capture one observation:
+
+```bash
+google-chrome --remote-debugging-port=9222
+python -m openrecall.browser_assist \
+  --cdp-url http://127.0.0.1:9222 \
+  --once \
+  --output /tmp/browser_assist_raw.jsonl
+```
+
+Saved Playwright MCP snapshots can be normalized into the same JSONL shape:
+
+```bash
+python -m openrecall.browser_assist \
+  --mcp-snapshot-input .playwright-mcp/snapshot.md \
+  --output /tmp/browser_assist_raw.jsonl
+```
+
+Pass the raw JSONL to StatiBaker's browser-assist adapter or as the
+`run_day.sh` browser-assist input. Use `--include-preview` only when a bounded
+local text preview is explicitly wanted.
+
+Browser-assist and vision rows are observer-only acquisition records. They are
+bounded, hash-heavy, non-authoritative, and set `kanban_projection_policy` to
+`observer_only`; they never carry direct workflow mutation fields or direct
+`PredicatePNF` candidates.
+
 ## OCR backend and offline processing
 
 OpenRecall's default path still runs OCR inline with live screenshot capture,

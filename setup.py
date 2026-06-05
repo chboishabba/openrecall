@@ -25,6 +25,7 @@ extras_require = {
     "linux": [],
     "python-doctr": ["python-doctr"],
     "embeddings": ["sentence-transformers"],
+    "browser-assist": ["playwright"],
 }
 
 # Determine the current OS
